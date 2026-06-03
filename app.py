@@ -2,6 +2,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import re
 import plotly.graph_objects as go
 
 st.set_page_config(page_title="WM MAP Dashboard", layout="wide")
@@ -13,44 +14,91 @@ GIANTS = {
     "7729101200"
 }
 
+YEARS = [2022, 2023, 2024, 2025]
+
+def clean_text(x):
+    if pd.isna(x):
+        return ""
+    return (
+        str(x)
+        .replace("\xa0", "")
+        .replace("  ", " ")
+        .strip()
+    )
+
 def clean_num(x):
+
     if pd.isna(x):
         return 0
 
-    x = str(x).replace("\\xa0", "").replace(" ", "").replace(",", ".").strip()
+    s = (
+        str(x)
+        .replace("\xa0", "")
+        .replace(" ", "")
+        .replace(",", ".")
+        .strip()
+    )
 
-    if x in ["-", "", "nan"]:
+    if s in ["", "-", "-.", "nan"]:
         return 0
 
     try:
-        return float(x)
+        return float(s)
     except:
         return 0
+
+def compact_money(v):
+
+    if v >= 1_000_000:
+        return f"{v/1_000_000:.1f}M$"
+
+    if v >= 1_000:
+        return f"{v/1_000:.1f}K$"
+
+    return f"{v:.0f}$"
 
 @st.cache_data
 def load_data(file):
 
     if file.name.endswith(".csv"):
-        df = pd.read_csv(file)
+        df = pd.read_csv(
+            file,
+            encoding="utf-8-sig",
+            engine="python"
+        )
     else:
         df = pd.read_excel(file)
 
-    df.columns = [c.strip() for c in df.columns]
+    df.columns = [clean_text(c) for c in df.columns]
 
-    df["ИНН"] = (
-        df["ИНН"]
-        .astype(str)
-        .str.replace("\\xa0", "", regex=False)
-        .str.strip()
-    )
+    df["ИНН"] = df["ИНН"].apply(clean_text)
+    df["Наименование"] = df["Наименование"].apply(clean_text)
 
-    years = [2022, 2023, 2024, 2025]
+    manager_col = [c for c in df.columns if "менедж" in c.lower()]
+    if manager_col:
+        df["Менеджер"] = df[manager_col[0]].apply(clean_text)
+    else:
+        df["Менеджер"] = ""
 
-    for y in years:
+    for y in YEARS:
 
-        turnover_col = [c for c in df.columns if f"Оборот {y}, долл" in c][0]
-        sales_col = [c for c in df.columns if f"Продажи {y} без НДС" in c][0]
-        potential_col = [c for c in df.columns if "Потенциал" in c and str(y) in c][0]
+        turnover_col = [
+            c for c in df.columns
+            if f"Оборот {y}, долл" in c
+        ][0]
+
+        potential_col = [
+            c for c in df.columns
+            if f"Потенциал по ароме {y}" in c
+        ][0]
+
+        sales_candidates = [
+            c for c in df.columns
+            if str(y) in c
+            and "без ндс" in c.lower()
+        ]
+
+        sales_col = sales_candidates[0]
 
         df[f"turnover_{y}"] = df[turnover_col].apply(clean_num)
         df[f"sales_{y}"] = df[sales_col].apply(clean_num)
@@ -62,7 +110,7 @@ def load_data(file):
             0
         )
 
-    current_year = max(years)
+    current_year = max(YEARS)
 
     df["category"] = ""
 
@@ -75,11 +123,10 @@ def load_data(file):
         ascending=False
     )
 
-    total_turnover = regular[f"turnover_{current_year}"].sum()
+    total = regular[f"turnover_{current_year}"].sum()
 
     regular["cum_share"] = (
-        regular[f"turnover_{current_year}"].cumsum()
-        / total_turnover
+        regular[f"turnover_{current_year}"].cumsum() / total
     )
 
     regular["category"] = np.select(
@@ -95,48 +142,36 @@ def load_data(file):
 
     rank_year = current_year
 
-    sales_col = f"sales_{rank_year}"
-
     df["rank"] = None
 
-    ranked = df[df[sales_col] > 0].copy()
+    ranked = df[df[f"sales_{rank_year}"] > 0].copy()
 
     ranked["rank"] = (
-        ranked[sales_col]
+        ranked[f"sales_{rank_year}"]
         .rank(method="min", ascending=False)
         .astype(int)
     )
 
     df.loc[ranked.index, "rank"] = ranked["rank"]
 
-    def calc_status(row):
+    def get_status(row):
 
-        turnover = row[f"turnover_{current_year}"]
         sales = row[f"sales_{current_year}"]
+        turnover = row[f"turnover_{current_year}"]
 
         if sales > 0:
             return "Активный"
 
-        if turnover > 0 and sales == 0:
+        if turnover > 0:
             return "Потенциал"
 
         return "Неактивный"
 
-    df["status"] = df.apply(calc_status, axis=1)
+    df["status"] = df.apply(get_status, axis=1)
 
     return df
 
-def compact_money(v):
-
-    if v >= 1_000_000:
-        return f"{v/1_000_000:.1f}M $"
-
-    if v >= 1_000:
-        return f"{v/1_000:.1f}K $"
-
-    return f"{v:.0f} $"
-
-st.title("WM MAP Dashboard")
+st.title("WM MAP Dashboard v2.1 FIXED")
 
 uploaded = st.file_uploader(
     "Загрузить CSV/XLSX",
@@ -147,36 +182,38 @@ if uploaded:
 
     df = load_data(uploaded)
 
-    current_year = 2025
+    current_year = max(YEARS)
 
     st.sidebar.header("Фильтры")
 
-    category_filter = st.sidebar.multiselect(
+    cats = st.sidebar.multiselect(
         "Категория",
-        options=["Гигант", "A", "Б", "В"],
+        ["Гигант", "A", "Б", "В"],
         default=["Гигант", "A", "Б", "В"]
     )
 
-    manager_filter = st.sidebar.multiselect(
-        "Менеджер",
-        options=sorted(df["Менеджер"].dropna().astype(str).unique()),
-        default=sorted(df["Менеджер"].dropna().astype(str).unique())
+    statuses = st.sidebar.multiselect(
+        "Статус",
+        ["Активный", "Потенциал", "Неактивный"],
+        default=["Активный", "Потенциал", "Неактивный"]
     )
 
-    status_filter = st.sidebar.multiselect(
-        "Статус",
-        options=["Активный", "Потенциал", "Неактивный"],
-        default=["Активный", "Потенциал", "Неактивный"]
+    managers = sorted(df["Менеджер"].dropna().unique())
+
+    selected_managers = st.sidebar.multiselect(
+        "Менеджер",
+        managers,
+        default=managers
     )
 
     search = st.sidebar.text_input("Поиск")
 
     filtered = df[
-        (df["category"].isin(category_filter))
+        (df["category"].isin(cats))
         &
-        (df["Менеджер"].astype(str).isin(manager_filter))
+        (df["status"].isin(statuses))
         &
-        (df["status"].isin(status_filter))
+        (df["Менеджер"].isin(selected_managers))
     ]
 
     if search:
@@ -185,22 +222,33 @@ if uploaded:
             .str.contains(search, case=False, na=False)
         ]
 
+    k1, k2, k3, k4 = st.columns(4)
+
     total_turnover = filtered[f"turnover_{current_year}"].sum()
     total_sales = filtered[f"sales_{current_year}"].sum()
+    avg_kup = filtered[f"kup_{current_year}"].mean()
 
-    avg_kup = (
-        filtered[f"kup_{current_year}"].mean()
-        if len(filtered) > 0 else 0
+    k1.metric(
+        "Оборот",
+        compact_money(total_turnover)
     )
 
-    c1, c2, c3, c4 = st.columns(4)
+    k2.metric(
+        "Продажи",
+        compact_money(total_sales)
+    )
 
-    c1.metric(f"Оборот {current_year}", compact_money(total_turnover))
-    c2.metric(f"Продажи {current_year}", compact_money(total_sales))
-    c3.metric("Средний КУП", f"{avg_kup:.1f}%")
-    c4.metric("Клиентов", len(filtered))
+    k3.metric(
+        "Средний КУП",
+        f"{avg_kup:.1f}%"
+    )
 
-    st.subheader("Список клиентов")
+    k4.metric(
+        "Клиентов",
+        len(filtered)
+    )
+
+    st.subheader("Клиенты")
 
     table = filtered[[
         "ИНН",
@@ -212,15 +260,20 @@ if uploaded:
     ]].copy()
 
     table["Место"] = table["rank"].apply(
-        lambda x: f"ТОП-{int(x)}" if pd.notna(x) else "нет"
+        lambda x: f"ТОП-{int(x)}"
+        if pd.notna(x)
+        else "нет"
     )
 
+    table = table.rename(columns={
+        "category": "Категория",
+        "status": "Статус"
+    })
+
     st.dataframe(
-        table.rename(columns={
-            "category": "Категория",
-            "status": "Статус"
-        }),
-        use_container_width=True
+        table.drop(columns=["rank"]),
+        use_container_width=True,
+        height=400
     )
 
     st.subheader("Карточка клиента")
@@ -242,15 +295,15 @@ if uploaded:
             else "нет"
         )
 
-        col1, col2, col3, col4, col5 = st.columns(5)
+        c1, c2, c3, c4 = st.columns(4)
 
-        col1.markdown(f"### {client['Наименование']}")
-        col2.metric("Категория", client["category"])
-        col3.metric("Место", place)
-        col4.metric("КУП", f"{client[f'kup_{current_year}']:.1f}%")
-        col5.metric("Статус", client["status"])
-
-        years = [2022, 2023, 2024, 2025]
+        c1.metric("Категория", client["category"])
+        c2.metric("Место", place)
+        c3.metric("Статус", client["status"])
+        c4.metric(
+            "КУП 2025",
+            f"{client['kup_2025']:.1f}%"
+        )
 
         turnover = []
         sales = []
@@ -261,7 +314,7 @@ if uploaded:
         prev_t = None
         prev_s = None
 
-        for y in years:
+        for y in YEARS:
 
             t = client[f"turnover_{y}"] / 1000
             s = client[f"sales_{y}"] / 1000
@@ -272,12 +325,16 @@ if uploaded:
             kup.append(k)
 
             if prev_t and prev_t > 0:
-                turnover_growth.append(((t - prev_t) / prev_t) * 100)
+                turnover_growth.append(
+                    ((t - prev_t) / prev_t) * 100
+                )
             else:
                 turnover_growth.append(None)
 
             if prev_s and prev_s > 0:
-                sales_growth.append(((s - prev_s) / prev_s) * 100)
+                sales_growth.append(
+                    ((s - prev_s) / prev_s) * 100
+                )
             else:
                 sales_growth.append(None)
 
@@ -287,59 +344,58 @@ if uploaded:
         fig = go.Figure()
 
         fig.add_bar(
-            x=years,
+            x=YEARS,
             y=turnover,
             name="Оборот, тыс.$"
         )
 
         fig.add_bar(
-            x=years,
+            x=YEARS,
             y=sales,
-            name="Продажи без НДС, тыс.$"
+            name="Продажи, тыс.$"
         )
 
         fig.add_trace(
             go.Scatter(
-                x=years,
-                y=turnover_growth,
+                x=YEARS,
+                y=kup,
                 mode="lines+markers+text",
-                name="Прирост оборота %",
+                name="КУП %",
                 yaxis="y2",
-                text=[f"{v:.1f}%" if v is not None else "" for v in turnover_growth],
+                line=dict(width=5),
+                text=[f"{v:.0f}%" for v in kup],
                 textposition="top center"
             )
         )
 
         fig.add_trace(
             go.Scatter(
-                x=years,
-                y=sales_growth,
-                mode="lines+markers+text",
-                name="Прирост продаж %",
-                yaxis="y2",
-                text=[f"{v:.1f}%" if v is not None else "" for v in sales_growth],
-                textposition="bottom center"
+                x=YEARS,
+                y=turnover_growth,
+                mode="lines+markers",
+                name="Прирост оборота %",
+                yaxis="y2"
             )
         )
 
         fig.add_trace(
             go.Scatter(
-                x=years,
-                y=kup,
-                mode="lines+markers+text",
-                line=dict(width=4),
-                name="КУП %",
-                yaxis="y2",
-                text=[f"{v:.1f}%" for v in kup],
-                textposition="top right"
+                x=YEARS,
+                y=sales_growth,
+                mode="lines+markers",
+                name="Прирост продаж %",
+                yaxis="y2"
             )
         )
 
         fig.update_layout(
-            title="Динамика показателей",
+            template="plotly_dark",
+            height=650,
             barmode="group",
-            height=600,
-            yaxis=dict(title="тыс.$"),
+            title=client["Наименование"],
+            yaxis=dict(
+                title="тыс.$"
+            ),
             yaxis2=dict(
                 title="%",
                 overlaying="y",
@@ -347,4 +403,7 @@ if uploaded:
             )
         )
 
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(
+            fig,
+            use_container_width=True
+        )
