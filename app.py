@@ -5,9 +5,11 @@ import numpy as np
 import plotly.graph_objects as go
 
 st.set_page_config(
-    page_title="WM MAP Dashboard v4 FULL BI",
+    page_title="WM MAP Dashboard v5 FULL BI",
     layout="wide"
 )
+
+YEARS = [2022, 2023, 2024, 2025]
 
 GIANTS = {
     "7705034202",
@@ -16,14 +18,13 @@ GIANTS = {
     "7729101200"
 }
 
-YEARS = [2022, 2023, 2024, 2025]
-
 def clean_text(x):
     if pd.isna(x):
         return ""
     return str(x).replace("\xa0", "").strip()
 
 def clean_num(x):
+
     if pd.isna(x):
         return 0.0
 
@@ -44,10 +45,13 @@ def clean_num(x):
         return 0.0
 
 def compact(v):
+
     if v >= 1_000_000:
         return f"{v/1_000_000:.1f}M$"
+
     if v >= 1_000:
         return f"{v/1_000:.1f}K$"
+
     return f"{v:.0f}$"
 
 @st.cache_data
@@ -63,7 +67,11 @@ def load_data(file):
     df["ИНН"] = df["ИНН"].apply(clean_text)
     df["Наименование"] = df["Наименование"].apply(clean_text)
 
-    manager_cols = [c for c in df.columns if "менедж" in c.lower()]
+    manager_cols = [
+        c for c in df.columns
+        if "менедж" in c.lower()
+    ]
+
     if manager_cols:
         df["Менеджер"] = df[manager_cols[0]].apply(clean_text)
     else:
@@ -88,7 +96,8 @@ def load_data(file):
 
         df[f"turnover_{y}"] = df[turnover_col].apply(clean_num)
         df[f"sales_{y}"] = df[sales_col].apply(clean_num)
-        df[f"potential_2022"] = df[potential_col].apply(clean_num)
+
+        df["potential_2022"] = df[potential_col].apply(clean_num)
 
         df[f"kup_{y}"] = np.where(
             df["potential_2022"] > 0,
@@ -109,11 +118,10 @@ def load_data(file):
         ascending=False
     )
 
-    total_turnover = regular[f"turnover_{current_year}"].sum()
+    total = regular[f"turnover_{current_year}"].sum()
 
     regular["cum_share"] = (
-        regular[f"turnover_{current_year}"].cumsum()
-        / total_turnover
+        regular[f"turnover_{current_year}"].cumsum() / total
     )
 
     regular["category"] = np.select(
@@ -154,53 +162,73 @@ def load_data(file):
 
 st.markdown("""
 <style>
+
 .stApp {
-    background-color: #07111f;
-    color: white;
+    background-color: #f5f7fb;
+    color: #0f172a;
+}
+
+section[data-testid="stSidebar"] {
+    background-color: white;
+    border-right: 1px solid #dbe4f0;
+}
+
+.block-container {
+    padding-top: 1rem;
 }
 
 [data-testid="metric-container"] {
-    background-color: #0d1b2d;
-    border: 1px solid #1f3b5b;
-    padding: 10px;
-    border-radius: 12px;
+    background-color: white;
+    border: 1px solid #dbe4f0;
+    padding: 14px;
+    border-radius: 14px;
 }
 
-.kup-box {
-    background: linear-gradient(135deg,#35104f,#581c87);
-    border-radius: 12px;
-    padding: 16px;
-    text-align:center;
-    border:1px solid #9333ea;
+.kpi-card {
+    background: white;
+    border: 1px solid #dbe4f0;
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 14px;
 }
 
-.kup-big {
-    font-size:42px;
-    font-weight:700;
-    color:#d946ef;
+.kup-card {
+    background: linear-gradient(135deg,#7c3aed,#9333ea);
+    color: white;
+    border-radius: 18px;
+    padding: 24px;
+    text-align: center;
+    margin-top: 10px;
 }
 
-.badge-pos {
-    background:#14532d;
-    color:#4ade80;
-    padding:4px 8px;
-    border-radius:8px;
-    font-weight:700;
+.kup-value {
+    font-size: 46px;
+    font-weight: 700;
 }
 
-.badge-neg {
-    background:#450a0a;
-    color:#f87171;
-    padding:4px 8px;
-    border-radius:8px;
-    font-weight:700;
+.small-label {
+    color: #64748b;
+    font-size: 13px;
 }
+
+.big-value {
+    font-size: 34px;
+    font-weight: 700;
+}
+
+.table-wrap {
+    background: white;
+    border-radius: 16px;
+    padding: 14px;
+    border: 1px solid #dbe4f0;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
-st.title("WM MAP Dashboard v4 FULL BI")
+st.title("Дашборд клиентов")
 
-uploaded = st.file_uploader(
+uploaded = st.sidebar.file_uploader(
     "Загрузить CSV/XLSX",
     type=["csv","xlsx","xls"]
 )
@@ -209,7 +237,7 @@ if uploaded:
 
     df = load_data(uploaded)
 
-    st.sidebar.header("Фильтры")
+    st.sidebar.subheader("Фильтры")
 
     categories = st.sidebar.multiselect(
         "Категория",
@@ -231,7 +259,10 @@ if uploaded:
         default=managers
     )
 
-    search = st.sidebar.text_input("Поиск клиента")
+    mode = st.selectbox(
+        "Отображение",
+        ["Все клиенты","Один клиент"]
+    )
 
     filtered = df[
         (df["category"].isin(categories))
@@ -241,11 +272,18 @@ if uploaded:
         (df["Менеджер"].isin(selected_managers))
     ]
 
-    if search:
+    if mode == "Один клиент":
+
+        selected = st.selectbox(
+            "Выберите клиента",
+            filtered["Наименование"].tolist()
+        )
+
         filtered = filtered[
-            filtered["Наименование"]
-            .str.contains(search, case=False, na=False)
+            filtered["Наименование"] == selected
         ]
+
+    row = filtered.iloc[0]
 
     top1, top2, top3, top4 = st.columns(4)
 
@@ -269,193 +307,247 @@ if uploaded:
         len(filtered)
     )
 
-    st.subheader("Клиенты")
+    left, right = st.columns([5,2])
 
-    tbl = filtered[[
-        "Наименование",
-        "Менеджер",
-        "category",
-        "status",
-        "rank"
-    ]].copy()
+    turnover_values = []
+    sales_values = []
+    kup_values = []
 
-    tbl["Место"] = tbl["rank"].apply(
+    turnover_growth = []
+    sales_growth = []
+
+    prev_t = None
+    prev_s = None
+
+    for y in YEARS:
+
+        t = filtered[f"turnover_{y}"].sum() / 1000
+        s = filtered[f"sales_{y}"].sum() / 1000
+        k = filtered[f"kup_{y}"].mean()
+
+        turnover_values.append(t)
+        sales_values.append(s)
+        kup_values.append(k)
+
+        if prev_t and prev_t > 0:
+            turnover_growth.append(
+                ((t-prev_t)/prev_t)*100
+            )
+        else:
+            turnover_growth.append(None)
+
+        if prev_s and prev_s > 0:
+            sales_growth.append(
+                ((s-prev_s)/prev_s)*100
+            )
+        else:
+            sales_growth.append(None)
+
+        prev_t = t
+        prev_s = s
+
+    with right:
+
+        place = (
+            f"ТОП-{int(row['rank'])}"
+            if pd.notna(row["rank"])
+            else "нет"
+        )
+
+        st.markdown(f"""
+        <div class="kpi-card">
+            <div class="small-label">Категория</div>
+            <div class="big-value">{row['category']}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown(f"""
+        <div class="kpi-card">
+            <div class="small-label">Место</div>
+            <div class="big-value">{place}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown(f"""
+        <div class="kpi-card">
+            <div class="small-label">Статус</div>
+            <div class="big-value">{row['status']}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown(f"""
+        <div class="kup-card">
+            <div>КУП 2025</div>
+            <div class="kup-value">
+                {filtered['kup_2025'].mean():.1f}%
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with left:
+
+        c1, c2 = st.columns(2)
+
+        with c1:
+
+            fig1 = go.Figure()
+
+            fig1.add_bar(
+                x=YEARS,
+                y=turnover_values,
+                marker_color="#2563eb",
+                text=[compact(v*1000) for v in turnover_values],
+                textposition="outside",
+                name="Оборот"
+            )
+
+            fig1.add_trace(
+                go.Scatter(
+                    x=YEARS,
+                    y=turnover_growth,
+                    mode="lines+markers+text",
+                    text=[
+                        f"{v:.1f}%"
+                        if v is not None else ""
+                        for v in turnover_growth
+                    ],
+                    textposition="top center",
+                    line=dict(color="#1d4ed8", width=3),
+                    name="Прирост"
+                )
+            )
+
+            fig1.update_layout(
+                title="ДИНАМИКА ОБОРОТА",
+                height=420,
+                paper_bgcolor="white",
+                plot_bgcolor="white",
+                font_color="#0f172a",
+                yaxis_title="тыс.$",
+                xaxis=dict(
+                    tickmode="array",
+                    tickvals=YEARS
+                )
+            )
+
+            st.plotly_chart(
+                fig1,
+                use_container_width=True
+            )
+
+        with c2:
+
+            fig2 = go.Figure()
+
+            fig2.add_bar(
+                x=YEARS,
+                y=sales_values,
+                marker_color="#16a34a",
+                text=[compact(v*1000) for v in sales_values],
+                textposition="outside",
+                name="Продажи"
+            )
+
+            fig2.add_trace(
+                go.Scatter(
+                    x=YEARS,
+                    y=sales_growth,
+                    mode="lines+markers+text",
+                    text=[
+                        f"{v:.1f}%"
+                        if v is not None else ""
+                        for v in sales_growth
+                    ],
+                    textposition="top center",
+                    line=dict(color="#15803d", width=3),
+                    name="Прирост"
+                )
+            )
+
+            fig2.update_layout(
+                title="ДИНАМИКА ПРОДАЖ",
+                height=420,
+                paper_bgcolor="white",
+                plot_bgcolor="white",
+                font_color="#0f172a",
+                yaxis_title="тыс.$",
+                xaxis=dict(
+                    tickmode="array",
+                    tickvals=YEARS
+                )
+            )
+
+            st.plotly_chart(
+                fig2,
+                use_container_width=True
+            )
+
+        fig3 = go.Figure()
+
+        fig3.add_trace(
+            go.Scatter(
+                x=YEARS,
+                y=kup_values,
+                mode="lines+markers+text",
+                line=dict(
+                    color="#9333ea",
+                    width=5
+                ),
+                marker=dict(size=14),
+                text=[
+                    f"{v:.1f}%"
+                    for v in kup_values
+                ],
+                textfont=dict(size=22),
+                textposition="top center"
+            )
+        )
+
+        fig3.update_layout(
+            title="ДИНАМИКА КУП (%)",
+            height=350,
+            paper_bgcolor="white",
+            plot_bgcolor="white",
+            font_color="#0f172a",
+            yaxis_title="КУП %",
+            xaxis=dict(
+                tickmode="array",
+                tickvals=YEARS
+            )
+        )
+
+        st.plotly_chart(
+            fig3,
+            use_container_width=True
+        )
+
+    st.subheader("Рейтинг клиентов")
+
+    table = filtered.copy()
+
+    table["Место"] = table["rank"].apply(
         lambda x: f"ТОП-{int(x)}"
         if pd.notna(x)
         else "нет"
     )
 
+    out = table[[
+        "Наименование",
+        "Менеджер",
+        "category",
+        "status",
+        "Место"
+    ]].rename(columns={
+        "category":"Категория",
+        "status":"Статус"
+    })
+
     st.dataframe(
-        tbl.drop(columns=["rank"]),
+        out,
         use_container_width=True,
-        height=280
+        height=350
     )
-
-    selected = st.selectbox(
-        "Карточка клиента",
-        filtered["Наименование"].tolist()
-    )
-
-    if selected:
-
-        client = filtered[
-            filtered["Наименование"] == selected
-        ].iloc[0]
-
-        left, right = st.columns([5,2])
-
-        with right:
-
-            place = (
-                f"ТОП-{int(client['rank'])}"
-                if pd.notna(client["rank"])
-                else "нет"
-            )
-
-            st.metric("Категория", client["category"])
-            st.metric("Место", place)
-            st.metric("Статус", client["status"])
-
-            st.markdown(f"""
-            <div class="kup-box">
-                <div>КУП 2025</div>
-                <div class="kup-big">
-                    {client['kup_2025']:.1f}%
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        with left:
-
-            turnover = []
-            sales = []
-            kup = []
-
-            turnover_growth = []
-            sales_growth = []
-
-            prev_t = None
-            prev_s = None
-
-            for y in YEARS:
-
-                t = client[f"turnover_{y}"] / 1000
-                s = client[f"sales_{y}"] / 1000
-                k = client[f"kup_{y}"]
-
-                turnover.append(t)
-                sales.append(s)
-                kup.append(k)
-
-                if prev_t and prev_t > 0:
-                    turnover_growth.append(
-                        ((t-prev_t)/prev_t)*100
-                    )
-                else:
-                    turnover_growth.append(None)
-
-                if prev_s and prev_s > 0:
-                    sales_growth.append(
-                        ((s-prev_s)/prev_s)*100
-                    )
-                else:
-                    sales_growth.append(None)
-
-                prev_t = t
-                prev_s = s
-
-            fig = go.Figure()
-
-            fig.add_bar(
-                x=YEARS,
-                y=turnover,
-                name="Оборот, тыс.$",
-                marker_color="#2563eb",
-                width=0.35,
-                offset=-0.2
-            )
-
-            fig.add_bar(
-                x=YEARS,
-                y=sales,
-                name="Продажи, тыс.$",
-                marker_color="#16a34a",
-                width=0.35,
-                offset=0.2,
-                yaxis="y2"
-            )
-
-            for i, year in enumerate(YEARS):
-
-                tg = turnover_growth[i]
-                sg = sales_growth[i]
-
-                if tg is not None:
-
-                    fig.add_annotation(
-                        x=year-0.15,
-                        y=turnover[i],
-                        text=f"{tg:.0f}%",
-                        showarrow=False,
-                        bgcolor="#14532d" if tg > 0 else "#7f1d1d",
-                        bordercolor="white",
-                        font=dict(color="white", size=12)
-                    )
-
-                if sg is not None:
-
-                    fig.add_annotation(
-                        x=year+0.15,
-                        y=sales[i],
-                        text=f"{sg:.0f}%",
-                        showarrow=False,
-                        bgcolor="#14532d" if sg > 0 else "#7f1d1d",
-                        bordercolor="white",
-                        font=dict(color="white", size=12)
-                    )
-
-                fig.add_annotation(
-                    x=year,
-                    y=max(turnover[i], sales[i]) * 1.12,
-                    text=f"<b>KUP {kup[i]:.1f}%</b>",
-                    showarrow=False,
-                    font=dict(
-                        size=18,
-                        color="#d946ef"
-                    )
-                )
-
-            fig.update_layout(
-                template="plotly_dark",
-                paper_bgcolor="#07111f",
-                plot_bgcolor="#07111f",
-                height=700,
-                barmode="group",
-                title=selected,
-                legend=dict(
-                    orientation="h"
-                ),
-                xaxis=dict(
-                    tickmode="array",
-                    tickvals=YEARS
-                ),
-                yaxis=dict(
-                    title="Оборот, тыс.$",
-                    side="left",
-                    gridcolor="#1e293b"
-                ),
-                yaxis2=dict(
-                    title="Продажи, тыс.$",
-                    overlaying="y",
-                    side="right",
-                    gridcolor="#1e293b"
-                )
-            )
-
-            st.plotly_chart(
-                fig,
-                use_container_width=True
-            )
 
 else:
-    st.info("Загрузите CSV/XLSX файл.")
+
+    st.info("Загрузите файл через sidebar.")
