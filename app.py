@@ -316,13 +316,38 @@ if uploaded:
         else "нет"
     )
 
-    h1, h2, h3, h4, h5 = st.columns(5)
+
+    # Last YoY calculations
+    prev_year = sorted(years)[-2]
+
+    current_sales = row[f"sales_{current_year}"]
+    prev_sales = row[f"sales_{prev_year}"]
+
+    current_turnover = row[f"turnover_{current_year}"]
+    prev_turnover = row[f"turnover_{prev_year}"]
+
+    if prev_sales > 0:
+        sales_yoy = ((current_sales - prev_sales) / prev_sales) * 100
+        sales_yoy_text = f"{sales_yoy:.1f}%"
+    else:
+        sales_yoy_text = "—"
+
+    if prev_turnover > 0:
+        turnover_yoy = ((current_turnover - prev_turnover) / prev_turnover) * 100
+        turnover_yoy_text = f"{turnover_yoy:.1f}%"
+    else:
+        turnover_yoy_text = "—"
+
+
+    h1, h2, h3, h4, h5, h6, h7 = st.columns(7)
 
     h1.markdown(f"### {row['Клиент']}")
     h2.markdown(f"**Менеджер:** {row['Менеджер']}")
     h3.markdown(f"**Категория:** {row['Категория']}")
     h4.markdown(f"**Место:** {place}")
     h5.markdown(f"**Статус:** {row['Статус']}")
+    h6.markdown(f"**Рост продаж YoY:** {sales_yoy_text}")
+    h7.markdown(f"**Рост оборота YoY:** {turnover_yoy_text}")
 
     st.divider()
 
