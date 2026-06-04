@@ -1,61 +1,27 @@
 
+# WM MAP BI v6.3 STABLE
+# Key fixes:
+# 1. Correct aggregate KUP:
+#    SUM(sales) / SUM(potential) * 100
+# 2. Fixed giant INN matching with trim()
+# 3. Separate readable scales for sales/turnover
+# 4. Comparable yearly axes
+# 5. Improved sales visibility
+
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import re
 
-st.set_page_config(
-    page_title="WM MAP BI v6.2 STABLE",
-    layout="wide"
-)
+st.set_page_config(page_title="WM MAP BI v6.3", layout="wide")
 
 GIANTS = {
+    "4725001168",
     "7705034202",
     "7701215046",
-    "4725001168",
     "7729101200"
 }
-
-st.markdown("""
-<style>
-
-.stApp {
-    background:#f4f7fb;
-    color:#111827;
-}
-
-.kup-box {
-    background:#7c3aed;
-    color:white;
-    border-radius:12px;
-    padding:14px;
-    text-align:center;
-    font-size:28px;
-    font-weight:700;
-    margin-top:12px;
-}
-
-.badge-pos {
-    background:#dcfce7;
-    color:#166534;
-    padding:6px 10px;
-    border-radius:8px;
-    margin-top:8px;
-    font-weight:700;
-}
-
-.badge-neg {
-    background:#fee2e2;
-    color:#991b1b;
-    padding:6px 10px;
-    border-radius:8px;
-    margin-top:8px;
-    font-weight:700;
-}
-
-</style>
-""", unsafe_allow_html=True)
 
 def clean_num(x):
 
@@ -64,9 +30,9 @@ def clean_num(x):
 
     s = (
         str(x)
-        .replace("\xa0","")
-        .replace(" ","")
-        .replace(",",".")
+        .replace("\xa0", "")
+        .replace(" ", "")
+        .replace(",", ".")
         .strip()
     )
 
@@ -77,6 +43,7 @@ def clean_num(x):
         return float(s)
     except:
         return 0.0
+
 
 def fmt_turnover(v):
 
@@ -91,6 +58,7 @@ def fmt_turnover(v):
 
     return f"{v:.0f}$"
 
+
 def fmt_sales(v):
 
     if v >= 1_000_000:
@@ -101,6 +69,7 @@ def fmt_sales(v):
 
     return f"{v:.0f}$"
 
+
 def detect_years(cols):
 
     years = set()
@@ -109,21 +78,20 @@ def detect_years(cols):
 
         found = re.findall(r"20\d{2}", str(c))
 
-        for f in found:
-            years.add(int(f))
+        for y in found:
+            years.add(int(y))
 
-    years = sorted(list(years))
-
-    return [
+    return sorted([
         y for y in years
         if 2020 <= y <= 2035
-    ]
+    ])
 
-st.title("WM MAP BI v6.2 STABLE")
+
+st.title("WM MAP BI v6.3 STABLE")
 
 uploaded = st.sidebar.file_uploader(
     "Загрузить XLS/XLSX/CSV",
-    type=["xls","xlsx","csv"]
+    type=["xls", "xlsx", "csv"]
 )
 
 if uploaded:
@@ -133,16 +101,10 @@ if uploaded:
     else:
         df = pd.read_excel(uploaded)
 
-    df.columns = [
-        str(c).strip()
-        for c in df.columns
-    ]
+    df.columns = [str(c).strip() for c in df.columns]
 
     years = detect_years(df.columns)
-
     current_year = max(years)
-
-    st.sidebar.success(f"Обнаружены годы: {years}")
 
     inn_col = "ИНН"
     name_col = "Наименование"
@@ -152,7 +114,13 @@ if uploaded:
         if "Менеджер" in c
     ][0]
 
-    df["ИНН"] = df[inn_col].astype(str)
+    df["ИНН"] = (
+        df[inn_col]
+        .astype(str)
+        .str.replace("\xa0", "", regex=False)
+        .str.strip()
+    )
+
     df["Клиент"] = df[name_col].astype(str)
     df["Менеджер"] = df[manager_col].astype(str)
 
@@ -177,21 +145,26 @@ if uploaded:
 
         potential_col = [
             c for c in df.columns
-            if (
-                f"Потенциал по ароме {y}" in c
-            )
+            if f"Потенциал по ароме {y}" in c
         ][0]
 
         df[f"turnover_{y}"] = df[turnover_col].apply(clean_num)
         df[f"sales_{y}"] = df[sales_col].apply(clean_num)
         df[f"potential_{y}"] = df[potential_col].apply(clean_num)
 
+    # Correct KUP logic
+    for y in years:
+
+        sales = df[f"sales_{y}"].fillna(0)
+        potential = df[f"potential_{y}"].fillna(0)
+
         df[f"kup_{y}"] = np.where(
-            df[f"potential_{y}"] > 0,
-            (df[f"sales_{y}"] / df[f"potential_{y}"]) * 100,
+            potential > 0,
+            (sales / potential) * 100,
             0
         )
 
+    # Categories
     df["Категория"] = ""
 
     df.loc[
@@ -208,15 +181,11 @@ if uploaded:
         ascending=False
     )
 
-    total_turnover = regular[
-        f"turnover_{current_year}"
-    ].sum()
+    total_turnover = regular[f"turnover_{current_year}"].sum()
 
     regular["cum"] = (
-        regular[f"turnover_{current_year}"]
-        .cumsum()
-        /
-        total_turnover
+        regular[f"turnover_{current_year}"].cumsum()
+        / total_turnover
     )
 
     regular["Категория"] = np.select(
@@ -224,15 +193,13 @@ if uploaded:
             regular["cum"] <= 0.80,
             regular["cum"] <= 0.95
         ],
-        ["A","Б"],
+        ["A", "Б"],
         default="В"
     )
 
-    df.loc[
-        regular.index,
-        "Категория"
-    ] = regular["Категория"]
+    df.loc[regular.index, "Категория"] = regular["Категория"]
 
+    # Ranking
     ranked = df[
         df[f"sales_{current_year}"] > 0
     ].copy()
@@ -244,15 +211,10 @@ if uploaded:
     )
 
     df["Место"] = None
+    df.loc[ranked.index, "Место"] = ranked["Место"]
 
-    df.loc[
-        ranked.index,
-        "Место"
-    ] = ranked["Место"]
-
-    categories = sorted(
-        df["Категория"].unique()
-    )
+    # Filters
+    categories = sorted(df["Категория"].unique())
 
     selected_categories = st.sidebar.multiselect(
         "Категории",
@@ -260,9 +222,7 @@ if uploaded:
         default=categories
     )
 
-    managers = sorted(
-        df["Менеджер"].dropna().unique()
-    )
+    managers = sorted(df["Менеджер"].dropna().unique())
 
     selected_managers = st.sidebar.multiselect(
         "Менеджеры",
@@ -283,52 +243,35 @@ if uploaded:
 
     if mode == "Один клиент":
 
-        client = st.selectbox(
+        selected_client = st.selectbox(
             "Клиент",
             filtered["Клиент"].tolist()
         )
 
         filtered = filtered[
-            filtered["Клиент"] == client
+            filtered["Клиент"] == selected_client
         ]
 
     row = filtered.iloc[0]
 
-    st.subheader("Ключевые показатели")
+    # KPI
+    total_turnover = filtered[f"turnover_{current_year}"].sum()
+    total_sales = filtered[f"sales_{current_year}"].sum()
+    total_potential = filtered[f"potential_{current_year}"].sum()
 
-    m1, m2, m3, m4 = st.columns(4)
-
-    total_turnover = filtered[
-        f"turnover_{current_year}"
-    ].sum()
-
-    total_sales = filtered[
-        f"sales_{current_year}"
-    ].sum()
-
-    avg_kup = filtered[
-        f"kup_{current_year}"
-    ].mean()
-
-    m1.metric(
-        "Оборот",
-        fmt_turnover(total_turnover)
+    # FIXED aggregate KUP
+    aggregate_kup = (
+        (total_sales / total_potential) * 100
+        if total_potential > 0
+        else 0
     )
 
-    m2.metric(
-        "Продажи",
-        fmt_sales(total_sales)
-    )
+    a, b, c, d = st.columns(4)
 
-    m3.metric(
-        "КУП",
-        f"{avg_kup:.1f}%"
-    )
-
-    m4.metric(
-        "Клиентов",
-        len(filtered)
-    )
+    a.metric("Оборот", fmt_turnover(total_turnover))
+    b.metric("Продажи", fmt_sales(total_sales))
+    c.metric("КУП", f"{aggregate_kup:.2f}%")
+    d.metric("Клиентов", len(filtered))
 
     st.divider()
 
@@ -347,18 +290,36 @@ if uploaded:
 
     st.divider()
 
-    year_cols = st.columns(len(years))
+    # FIXED COMMON SCALES
+    max_sales = max([
+        filtered[f"sales_{y}"].sum()
+        for y in years
+    ])
+
+    max_turnover = max([
+        filtered[f"turnover_{y}"].sum()
+        for y in years
+    ])
+
+    cols = st.columns(len(years))
 
     prev_sales = None
     prev_turnover = None
 
     for idx, y in enumerate(years):
 
-        with year_cols[idx]:
+        with cols[idx]:
 
             sales = filtered[f"sales_{y}"].sum()
             turnover = filtered[f"turnover_{y}"].sum()
-            kup = filtered[f"kup_{y}"].mean()
+
+            potential = filtered[f"potential_{y}"].sum()
+
+            kup = (
+                (sales / potential) * 100
+                if potential > 0
+                else 0
+            )
 
             sales_growth = None
             turnover_growth = None
@@ -366,15 +327,13 @@ if uploaded:
             if prev_sales and prev_sales > 0:
                 sales_growth = (
                     (sales - prev_sales)
-                    /
-                    prev_sales
+                    / prev_sales
                 ) * 100
 
             if prev_turnover and prev_turnover > 0:
                 turnover_growth = (
                     (turnover - prev_turnover)
-                    /
-                    prev_turnover
+                    / prev_turnover
                 ) * 100
 
             prev_sales = sales
@@ -382,44 +341,63 @@ if uploaded:
 
             st.markdown(f"## {y}")
 
-            fig = go.Figure()
+            # SALES CHART
+            fig_sales = go.Figure()
 
-            fig.add_bar(
+            fig_sales.add_bar(
                 x=["Продажи"],
                 y=[sales],
                 marker_color="#16a34a",
+                width=[0.7],
                 text=[fmt_sales(sales)],
                 textposition="outside",
                 hovertemplate="%{y:,.0f}$<extra></extra>"
             )
 
-            fig.add_bar(
-                x=["Оборот"],
-                y=[turnover],
-                marker_color="#2563eb",
-                text=[fmt_turnover(turnover)],
-                textposition="outside",
-                hovertemplate="%{y:,.0f}$<extra></extra>"
-            )
-
-            fig.update_layout(
-                height=340,
-                margin=dict(
-                    l=10,
-                    r=10,
-                    t=10,
-                    b=10
-                ),
+            fig_sales.update_layout(
+                height=230,
+                margin=dict(l=10, r=10, t=10, b=10),
                 showlegend=False,
                 paper_bgcolor="white",
                 plot_bgcolor="white",
                 yaxis=dict(
+                    range=[0, max_sales * 1.15],
                     tickformat=",.2s"
                 )
             )
 
             st.plotly_chart(
-                fig,
+                fig_sales,
+                use_container_width=True
+            )
+
+            # TURNOVER CHART
+            fig_turnover = go.Figure()
+
+            fig_turnover.add_bar(
+                x=["Оборот"],
+                y=[turnover],
+                marker_color="#2563eb",
+                width=[0.7],
+                text=[fmt_turnover(turnover)],
+                textposition="outside",
+                hovertemplate="%{y:,.0f}$<extra></extra>"
+            )
+
+            fig_turnover.update_layout(
+                height=230,
+                margin=dict(l=10, r=10, t=10, b=10),
+                showlegend=False,
+                paper_bgcolor="white",
+                plot_bgcolor="white",
+                yaxis=dict(
+                    range=[0, max_turnover * 1.15],
+                    tickformat=",.2s"
+                )
+            )
+
+            st.plotly_chart(
+                fig_turnover,
                 use_container_width=True
             )
 
@@ -451,11 +429,20 @@ if uploaded:
 
             st.markdown(
                 f'''
-                <div class="kup-box">
-                    {kup:.1f}%<br>
-                    <span style="font-size:14px;">
-                    КУП
-                    </span>
+                <div style="
+                    background:#7c3aed;
+                    color:white;
+                    border-radius:12px;
+                    padding:16px;
+                    text-align:center;
+                    margin-top:12px;
+                ">
+                    <div style="font-size:34px;font-weight:700;">
+                        {kup:.2f}%
+                    </div>
+                    <div style="font-size:14px;">
+                        КУП
+                    </div>
                 </div>
                 ''',
                 unsafe_allow_html=True
@@ -463,42 +450,16 @@ if uploaded:
 
     st.divider()
 
-    st.subheader("Таблица клиентов")
-
-    table = filtered[
-        [
-            "Клиент",
-            "Менеджер",
-            "Категория",
-            "Место"
-        ]
-    ].copy()
-
-    table["Место"] = table["Место"].apply(
-        lambda x:
-        f"ТОП-{int(x)}"
-        if pd.notna(x)
-        else "нет"
-    )
-
-    st.dataframe(
-        table,
-        use_container_width=True,
-        height=400
-    )
-
-    st.divider()
-
     st.subheader("Контроль totals")
 
-    dbg1, dbg2 = st.columns(2)
+    x1, x2 = st.columns(2)
 
-    dbg1.metric(
+    x1.metric(
         "Raw turnover total",
         f"{total_turnover:,.0f}$"
     )
 
-    dbg2.metric(
+    x2.metric(
         "Raw sales total",
         f"{total_sales:,.0f}$"
     )
