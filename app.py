@@ -213,6 +213,27 @@ if uploaded:
     df["Место"] = None
     df.loc[ranked.index, "Место"] = ranked["Место"]
 
+
+    # Client statuses
+    def calc_status(row):
+
+        current_sales = row[f"sales_{current_year}"]
+
+        total_sales_all = sum(
+            row[f"sales_{yy}"]
+            for yy in years
+        )
+
+        if current_sales > 0:
+            return "Активный"
+
+        if total_sales_all == 0:
+            return "Потенциальный"
+
+        return "Неактивный"
+
+    df["Статус"] = df.apply(calc_status, axis=1)
+
     # Filters
     categories = sorted(df["Категория"].unique())
 
@@ -230,6 +251,18 @@ if uploaded:
         default=managers
     )
 
+    statuses = [
+        "Активный",
+        "Неактивный",
+        "Потенциальный"
+    ]
+
+    selected_statuses = st.sidebar.multiselect(
+        "Статус клиента",
+        statuses,
+        default=statuses
+    )
+
     mode = st.sidebar.radio(
         "Режим",
         ["Один клиент", "Сводный"]
@@ -239,6 +272,8 @@ if uploaded:
         (df["Категория"].isin(selected_categories))
         &
         (df["Менеджер"].isin(selected_managers))
+        &
+        (df["Статус"].isin(selected_statuses))
     ]
 
     if mode == "Один клиент":
@@ -281,12 +316,13 @@ if uploaded:
         else "нет"
     )
 
-    h1, h2, h3, h4 = st.columns(4)
+    h1, h2, h3, h4, h5 = st.columns(5)
 
     h1.markdown(f"### {row['Клиент']}")
     h2.markdown(f"**Менеджер:** {row['Менеджер']}")
     h3.markdown(f"**Категория:** {row['Категория']}")
     h4.markdown(f"**Место:** {place}")
+    h5.markdown(f"**Статус:** {row['Статус']}")
 
     st.divider()
 
