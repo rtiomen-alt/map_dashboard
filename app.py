@@ -3,10 +3,12 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+import re
 
-st.set_page_config(page_title="WM MAP BI v6.1", layout="wide")
-
-YEARS_RANGE = range(2020, 2035)
+st.set_page_config(
+    page_title="WM MAP BI v6.2 STABLE",
+    layout="wide"
+)
 
 GIANTS = {
     "7705034202",
@@ -17,23 +19,10 @@ GIANTS = {
 
 st.markdown("""
 <style>
+
 .stApp {
     background:#f4f7fb;
     color:#111827;
-}
-
-.metric-card {
-    background:white;
-    border-radius:16px;
-    padding:16px;
-    border:1px solid #dbe4f0;
-}
-
-.year-card {
-    background:white;
-    border-radius:16px;
-    padding:12px;
-    border:1px solid #dbe4f0;
 }
 
 .kup-box {
@@ -42,9 +31,9 @@ st.markdown("""
     border-radius:12px;
     padding:14px;
     text-align:center;
-    font-size:26px;
+    font-size:28px;
     font-weight:700;
-    margin-top:10px;
+    margin-top:12px;
 }
 
 .badge-pos {
@@ -64,6 +53,7 @@ st.markdown("""
     margin-top:8px;
     font-weight:700;
 }
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -88,7 +78,7 @@ def clean_num(x):
     except:
         return 0.0
 
-def format_turnover(v):
+def fmt_turnover(v):
 
     if v >= 1_000_000_000:
         return f"{v/1_000_000_000:.2f}B$"
@@ -101,7 +91,7 @@ def format_turnover(v):
 
     return f"{v:.0f}$"
 
-def format_sales(v):
+def fmt_sales(v):
 
     if v >= 1_000_000:
         return f"{v/1_000_000:.2f}M$"
@@ -111,22 +101,29 @@ def format_sales(v):
 
     return f"{v:.0f}$"
 
-def detect_years(columns):
+def detect_years(cols):
 
     years = set()
 
-    for c in columns:
-        for y in YEARS_RANGE:
-            if str(y) in str(c):
-                years.add(y)
+    for c in cols:
 
-    return sorted(list(years))
+        found = re.findall(r"20\d{2}", str(c))
 
-st.title("WM MAP BI v6.1")
+        for f in found:
+            years.add(int(f))
+
+    years = sorted(list(years))
+
+    return [
+        y for y in years
+        if 2020 <= y <= 2035
+    ]
+
+st.title("WM MAP BI v6.2 STABLE")
 
 uploaded = st.sidebar.file_uploader(
-    "Загрузить CSV/XLSX",
-    type=["csv","xlsx","xls"]
+    "Загрузить XLS/XLSX/CSV",
+    type=["xls","xlsx","csv"]
 )
 
 if uploaded:
@@ -136,60 +133,58 @@ if uploaded:
     else:
         df = pd.read_excel(uploaded)
 
-    df.columns = [str(c).strip() for c in df.columns]
+    df.columns = [
+        str(c).strip()
+        for c in df.columns
+    ]
 
     years = detect_years(df.columns)
 
     current_year = max(years)
 
-    st.sidebar.success(f"Годы: {years}")
+    st.sidebar.success(f"Обнаружены годы: {years}")
 
-    inn_col = [c for c in df.columns if "ИНН" in c][0]
-    name_col = [c for c in df.columns if "Наименование" in c][0]
+    inn_col = "ИНН"
+    name_col = "Наименование"
 
-    manager_cols = [c for c in df.columns if "менедж" in c.lower()]
-
-    manager_col = manager_cols[0] if manager_cols else None
+    manager_col = [
+        c for c in df.columns
+        if "Менеджер" in c
+    ][0]
 
     df["ИНН"] = df[inn_col].astype(str)
     df["Клиент"] = df[name_col].astype(str)
-
-    if manager_col:
-        df["Менеджер"] = df[manager_col].astype(str)
-    else:
-        df["Менеджер"] = ""
+    df["Менеджер"] = df[manager_col].astype(str)
 
     for y in years:
 
-        turnover_cols = [
+        turnover_col = [
             c for c in df.columns
-            if f"Оборот {y}" in c
-        ]
+            if (
+                f"Оборот {y}" in c
+                and "долл" in c.lower()
+                and "руб" not in c.lower()
+            )
+        ][0]
 
-        sales_cols = [
+        sales_col = [
             c for c in df.columns
-            if f"Продажи {y}" in c and "без НДС" in c
-        ]
+            if (
+                f"Продажи {y}" in c
+                and "без НДС" in c
+            )
+        ][0]
 
-        potential_cols = [
+        potential_col = [
             c for c in df.columns
-            if "Потенциал" in c and str(y) in c
-        ]
+            if (
+                f"Потенциал по ароме {y}" in c
+            )
+        ][0]
 
-        df[f"turnover_{y}"] = (
-            df[turnover_cols[0]].apply(clean_num)
-            if turnover_cols else 0
-        )
-
-        df[f"sales_{y}"] = (
-            df[sales_cols[0]].apply(clean_num)
-            if sales_cols else 0
-        )
-
-        df[f"potential_{y}"] = (
-            df[potential_cols[0]].apply(clean_num)
-            if potential_cols else 0
-        )
+        df[f"turnover_{y}"] = df[turnover_col].apply(clean_num)
+        df[f"sales_{y}"] = df[sales_col].apply(clean_num)
+        df[f"potential_{y}"] = df[potential_col].apply(clean_num)
 
         df[f"kup_{y}"] = np.where(
             df[f"potential_{y}"] > 0,
@@ -199,19 +194,29 @@ if uploaded:
 
     df["Категория"] = ""
 
-    df.loc[df["ИНН"].isin(GIANTS), "Категория"] = "ГИГАНТ"
+    df.loc[
+        df["ИНН"].isin(GIANTS),
+        "Категория"
+    ] = "ГИГАНТ"
 
-    regular = df[~df["ИНН"].isin(GIANTS)].copy()
+    regular = df[
+        ~df["ИНН"].isin(GIANTS)
+    ].copy()
 
     regular = regular.sort_values(
         f"turnover_{current_year}",
         ascending=False
     )
 
-    total = regular[f"turnover_{current_year}"].sum()
+    total_turnover = regular[
+        f"turnover_{current_year}"
+    ].sum()
 
     regular["cum"] = (
-        regular[f"turnover_{current_year}"].cumsum() / total
+        regular[f"turnover_{current_year}"]
+        .cumsum()
+        /
+        total_turnover
     )
 
     regular["Категория"] = np.select(
@@ -223,9 +228,14 @@ if uploaded:
         default="В"
     )
 
-    df.loc[regular.index, "Категория"] = regular["Категория"]
+    df.loc[
+        regular.index,
+        "Категория"
+    ] = regular["Категория"]
 
-    ranked = df[df[f"sales_{current_year}"] > 0].copy()
+    ranked = df[
+        df[f"sales_{current_year}"] > 0
+    ].copy()
 
     ranked["Место"] = (
         ranked[f"sales_{current_year}"]
@@ -234,9 +244,15 @@ if uploaded:
     )
 
     df["Место"] = None
-    df.loc[ranked.index, "Место"] = ranked["Место"]
 
-    categories = sorted(df["Категория"].unique())
+    df.loc[
+        ranked.index,
+        "Место"
+    ] = ranked["Место"]
+
+    categories = sorted(
+        df["Категория"].unique()
+    )
 
     selected_categories = st.sidebar.multiselect(
         "Категории",
@@ -244,7 +260,9 @@ if uploaded:
         default=categories
     )
 
-    managers = sorted(df["Менеджер"].dropna().unique())
+    managers = sorted(
+        df["Менеджер"].dropna().unique()
+    )
 
     selected_managers = st.sidebar.multiselect(
         "Менеджеры",
@@ -265,36 +283,46 @@ if uploaded:
 
     if mode == "Один клиент":
 
-        selected_client = st.selectbox(
+        client = st.selectbox(
             "Клиент",
             filtered["Клиент"].tolist()
         )
 
         filtered = filtered[
-            filtered["Клиент"] == selected_client
+            filtered["Клиент"] == client
         ]
 
     row = filtered.iloc[0]
 
+    st.subheader("Ключевые показатели")
+
     m1, m2, m3, m4 = st.columns(4)
+
+    total_turnover = filtered[
+        f"turnover_{current_year}"
+    ].sum()
+
+    total_sales = filtered[
+        f"sales_{current_year}"
+    ].sum()
+
+    avg_kup = filtered[
+        f"kup_{current_year}"
+    ].mean()
 
     m1.metric(
         "Оборот",
-        format_turnover(
-            filtered[f"turnover_{current_year}"].sum()
-        )
+        fmt_turnover(total_turnover)
     )
 
     m2.metric(
         "Продажи",
-        format_sales(
-            filtered[f"sales_{current_year}"].sum()
-        )
+        fmt_sales(total_sales)
     )
 
     m3.metric(
         "КУП",
-        f"{filtered[f'kup_{current_year}'].mean():.1f}%"
+        f"{avg_kup:.1f}%"
     )
 
     m4.metric(
@@ -304,13 +332,13 @@ if uploaded:
 
     st.divider()
 
-    h1, h2, h3, h4 = st.columns(4)
-
     place = (
         f"ТОП-{int(row['Место'])}"
         if pd.notna(row["Место"])
         else "нет"
     )
+
+    h1, h2, h3, h4 = st.columns(4)
 
     h1.markdown(f"### {row['Клиент']}")
     h2.markdown(f"**Менеджер:** {row['Менеджер']}")
@@ -319,30 +347,38 @@ if uploaded:
 
     st.divider()
 
-    cols = st.columns(len(years))
+    year_cols = st.columns(len(years))
 
     prev_sales = None
     prev_turnover = None
 
     for idx, y in enumerate(years):
 
-        sales = filtered[f"sales_{y}"].sum()
-        turnover = filtered[f"turnover_{y}"].sum()
-        kup = filtered[f"kup_{y}"].mean()
+        with year_cols[idx]:
 
-        sales_growth = None
-        turnover_growth = None
+            sales = filtered[f"sales_{y}"].sum()
+            turnover = filtered[f"turnover_{y}"].sum()
+            kup = filtered[f"kup_{y}"].mean()
 
-        if prev_sales and prev_sales > 0:
-            sales_growth = ((sales-prev_sales)/prev_sales)*100
+            sales_growth = None
+            turnover_growth = None
 
-        if prev_turnover and prev_turnover > 0:
-            turnover_growth = ((turnover-prev_turnover)/prev_turnover)*100
+            if prev_sales and prev_sales > 0:
+                sales_growth = (
+                    (sales - prev_sales)
+                    /
+                    prev_sales
+                ) * 100
 
-        prev_sales = sales
-        prev_turnover = turnover
+            if prev_turnover and prev_turnover > 0:
+                turnover_growth = (
+                    (turnover - prev_turnover)
+                    /
+                    prev_turnover
+                ) * 100
 
-        with cols[idx]:
+            prev_sales = sales
+            prev_turnover = turnover
 
             st.markdown(f"## {y}")
 
@@ -352,7 +388,7 @@ if uploaded:
                 x=["Продажи"],
                 y=[sales],
                 marker_color="#16a34a",
-                text=[format_sales(sales)],
+                text=[fmt_sales(sales)],
                 textposition="outside",
                 hovertemplate="%{y:,.0f}$<extra></extra>"
             )
@@ -361,17 +397,22 @@ if uploaded:
                 x=["Оборот"],
                 y=[turnover],
                 marker_color="#2563eb",
-                text=[format_turnover(turnover)],
+                text=[fmt_turnover(turnover)],
                 textposition="outside",
                 hovertemplate="%{y:,.0f}$<extra></extra>"
             )
 
             fig.update_layout(
                 height=340,
-                margin=dict(l=10,r=10,t=10,b=10),
+                margin=dict(
+                    l=10,
+                    r=10,
+                    t=10,
+                    b=10
+                ),
+                showlegend=False,
                 paper_bgcolor="white",
                 plot_bgcolor="white",
-                showlegend=False,
                 yaxis=dict(
                     tickformat=",.2s"
                 )
@@ -412,7 +453,9 @@ if uploaded:
                 f'''
                 <div class="kup-box">
                     {kup:.1f}%<br>
-                    <span style="font-size:14px;">КУП</span>
+                    <span style="font-size:14px;">
+                    КУП
+                    </span>
                 </div>
                 ''',
                 unsafe_allow_html=True
@@ -422,15 +465,18 @@ if uploaded:
 
     st.subheader("Таблица клиентов")
 
-    table = filtered[[
-        "Клиент",
-        "Менеджер",
-        "Категория",
-        "Место"
-    ]].copy()
+    table = filtered[
+        [
+            "Клиент",
+            "Менеджер",
+            "Категория",
+            "Место"
+        ]
+    ].copy()
 
     table["Место"] = table["Место"].apply(
-        lambda x: f"ТОП-{int(x)}"
+        lambda x:
+        f"ТОП-{int(x)}"
         if pd.notna(x)
         else "нет"
     )
@@ -439,6 +485,22 @@ if uploaded:
         table,
         use_container_width=True,
         height=400
+    )
+
+    st.divider()
+
+    st.subheader("Контроль totals")
+
+    dbg1, dbg2 = st.columns(2)
+
+    dbg1.metric(
+        "Raw turnover total",
+        f"{total_turnover:,.0f}$"
+    )
+
+    dbg2.metric(
+        "Raw sales total",
+        f"{total_sales:,.0f}$"
     )
 
 else:
