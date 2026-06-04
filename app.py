@@ -291,15 +291,13 @@ if uploaded:
     st.divider()
 
     # FIXED COMMON SCALES
-    max_sales = max([
-        filtered[f"sales_{y}"].sum()
-        for y in years
-    ])
+    max_sales = max(
+        [filtered[f"sales_{y}"].sum() for y in years] + [1]
+    )
 
-    max_turnover = max([
-        filtered[f"turnover_{y}"].sum()
-        for y in years
-    ])
+    max_turnover = max(
+        [filtered[f"turnover_{y}"].sum() for y in years] + [1]
+    )
 
     cols = st.columns(len(years))
 
@@ -368,7 +366,8 @@ if uploaded:
 
             st.plotly_chart(
                 fig_sales,
-                use_container_width=True
+                use_container_width=True,
+                key=f"sales_chart_{idx}_{y}"
             )
 
             # TURNOVER CHART
@@ -398,7 +397,8 @@ if uploaded:
 
             st.plotly_chart(
                 fig_turnover,
-                use_container_width=True
+                use_container_width=True,
+                key=f"turnover_chart_{idx}_{y}"
             )
 
             if sales_growth is not None:
