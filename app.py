@@ -528,3 +528,47 @@ if uploaded:
 else:
 
     st.info("Загрузите файл.")
+
+
+# --- SUMMARY CLIENT TABLE PATCH ---
+
+try:
+
+    if mode == "Сводный":
+
+        st.markdown("---")
+        st.subheader("Клиенты по фильтрам")
+
+        status_order = {
+            "Активный": 0,
+            "Неактивный": 1,
+            "Потенциальный": 2
+        }
+
+        sales_last_col = f"sales_{current_year}"
+
+        summary_clients = filtered.copy()
+
+        summary_clients["status_order"] = summary_clients["Статус"].map(status_order)
+
+        summary_clients = summary_clients.sort_values(
+            by=["status_order", sales_last_col],
+            ascending=[True, False]
+        )
+
+        summary_table = pd.DataFrame({
+            "Клиент": summary_clients["Клиент"],
+            "Менеджер": summary_clients["Менеджер"],
+            "Категория": summary_clients["Категория"],
+            "Статус": summary_clients["Статус"],
+            f"Продажи {current_year}": summary_clients[sales_last_col]
+        })
+
+        st.dataframe(
+            summary_table,
+            use_container_width=True,
+            height=500
+        )
+
+except:
+    pass
